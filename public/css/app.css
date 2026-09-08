@@ -139,10 +139,13 @@ h1, h2, h3, h4 { font-family: var(--serif); color: #3a2d1e; }
 .home-mod-head .sub { color: var(--muted); font-size: 12px; flex: 1; }
 .home-mod-head .more { font-size: 12.5px; }
 
-.carousel-home { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
-.carousel-item-media { position: relative; height: 340px; width: 100%; background: #2c2419; overflow: hidden; cursor: pointer; }
-.carousel-item-media img { width: 100%; height: 100%; object-fit: contain; }
-.carousel-item-media video { width: 100%; height: 100%; }
+.carousel-home { display: flex; justify-content: center; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
+.carousel-home .el-carousel { width: 100%; max-width: min(560px, 100%); }
+/* 轮播区域为正方形（宽高 1:1） */
+.carousel-home .el-carousel__container { height: auto !important; aspect-ratio: 1 / 1; }
+.carousel-item-media { position: relative; width: 100%; height: 100%; background: #2c2419; overflow: hidden; cursor: pointer; }
+.carousel-item-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.carousel-item-media video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .carousel-item-cap {
   position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 20px 12px; color: #fff;
   background: linear-gradient(transparent, rgba(20,12,5,.75)); font-family: var(--serif); font-size: 16px;

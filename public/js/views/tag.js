@@ -11,6 +11,7 @@
         showForm: false,
         includeDesc: false,
         formTagId: null,
+        zoomItem: null,
       };
     },
     computed: {
@@ -55,13 +56,18 @@
     },
     methods: {
       openTag(t) { DB.navigate('/tag/' + t.id); },
-      openResource(r) { DB.navigate('/resource/' + r.id); },
       countOf(id) {
         return DB.resourcesOfTag(id, true).length;
       },
       uploadHere() {
         this.formTagId = this.tag.id;
         this.showForm = true;
+      },
+      playMedia(r) {
+        this.zoomItem = r;
+      },
+      closeZoom() {
+        this.zoomItem = null;
       },
       editMeta() {
         this.descForm = {
@@ -158,12 +164,13 @@
         </el-radio-group>
         <div v-if="!mediaAll.length" class="card empty-hint">该标签暂无图片或视频资源</div>
         <div v-else>
+          <div class="text-muted" style="font-size:12px;margin-bottom:8px">点击任意画面可浮层放大查看（不再跳转详情页）</div>
           <div class="carousel-home">
-            <el-carousel height="420px" :interval="3800" trigger="click">
+            <el-carousel :interval="3800" trigger="click">
               <el-carousel-item v-for="r in mediaAll" :key="r.id">
-                <div class="carousel-item-media" @click="openResource(r)">
-                  <img v-if="r.type==='image'" :src="'/api/resource/'+r.id+'/file'" />
-                  <video v-else :src="'/api/resource/'+r.id+'/file'" controls preload="metadata" loop></video>
+                <div class="carousel-item-media" @click="playMedia(r)" :title="'点击放大：'+r.title">
+                  <img v-if="r.type==='image'" :src="'/api/resource/'+r.id+'/file'" :alt="r.title" />
+                  <video v-else :src="'/api/resource/'+r.id+'/file'" preload="metadata" muted loop></video>
                   <div class="carousel-item-cap">{{ r.type==='video' ? '🎬' : '🖼' }} {{ r.title }}</div>
                 </div>
               </el-carousel-item>
@@ -198,7 +205,14 @@
       </el-tab-pane>
     </el-tabs>
 
-    <ResourceFormDialog :visible="showForm" :initial-tags="formTagId ? [formTagId] : []" @update:visible="showForm=$event" />
+    <!-- 轮播点击放大：图片用缩放查看器，视频用浮层播放 -->
+    <ZoomViewer v-if="zoomItem && zoomItem.type==='image'" :src="'/api/resource/'+zoomItem.id+'/file'" :title="zoomItem.title" @close="closeZoom" />
+    <el-dialog v-else-if="zoomItem" :model-value="!!zoomItem" @update:model-value="closeZoom" :title="zoomItem.title" width="min(840px,92vw)" top="5vh" destroy-on-close>
+      <video :src="'/api/resource/'+zoomItem.id+'/file'" controls autoplay style="width:100%;max-height:76vh;background:#000" />
+    </el-dialog>
+
+    <!-- 上传后停留在标签详情页，不跳转资源详情 -->
+    <ResourceFormDialog :visible="showForm" :initial-tags="formTagId ? [formTagId] : []" stay @update:visible="showForm=$event" />
 
     <!-- tag meta edit -->
     <el-dialog :model-value="descEdit" @update:model-value="descEdit=$event" title="编辑标签" width="640px">

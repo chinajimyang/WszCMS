@@ -74,6 +74,9 @@
   </div>
 </div>`,
   };
+  // 暴露为全局组件，供标签页轮播等其它视图做图片放大查看
+  window.AppComponents = window.AppComponents || {};
+  window.AppComponents.ZoomViewer = ZoomViewer;
 
   // ================== detail page ==================
   Views.resource = {

@@ -42,6 +42,7 @@ const DEFAULT_HOME = {
   ],
   modules: [
     { id: 'm_featured', type: 'featured', title: '精选推荐', enabled: true },
+    { id: 'm_random', type: 'random', title: '随机推荐', enabled: true },
     { id: 'm_latest', type: 'latest', title: '最新收录', enabled: true },
   ],
 };

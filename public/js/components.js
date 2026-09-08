@@ -205,6 +205,8 @@
       visible: { type: Boolean, default: false },
       resourceId: { type: [Number, String], default: null },
       initialTags: { type: Array, default: null },
+      // 创建成功后是否停留在当前页面（不跳转资源详情页）
+      stay: { type: Boolean, default: false },
     },
     emits: ['update:visible', 'saved'],
     data() {
@@ -226,6 +228,14 @@
       'form.tags'(list) {
         // keep primary within selected tags
         if (!(list || []).includes(this.form.primaryTag)) this.form.primaryTag = list && list.length ? list[0] : null;
+      },
+      'form.primaryTag'(id) {
+        // 资源名称未指定时，以主标签名称自动作为资源名称
+        if (!String(this.form.title || '').trim() && id) {
+          const tg = DB.tagById(id);
+          const nm = tg ? String(tg.name_zh || tg.name_en || tg.name_native || tg.name || '').trim() : '';
+          if (nm) this.form.title = nm;
+        }
       },
     },
     beforeUnmount() {
@@ -361,7 +371,7 @@
           ElementPlus.ElMessage.success(this.isNew ? '已创建资源' : '已保存修改');
           await DB.refresh();
           this.$emit('saved', { id: res.resource.id, isNew: this.isNew });
-          if (this.isNew) DB.navigate('/resource/' + res.resource.id);
+          if (this.isNew && !this.stay) DB.navigate('/resource/' + res.resource.id);
           this.close();
         } catch (err) {
           ElementPlus.ElMessage.error(err.message || '保存失败');

@@ -207,5 +207,23 @@
     }
     return chain;
   };
+  // 当天日期键（yyyy-mm-dd，本地时区），用于每日更换类的可复现随机
+  u.dayKey = function () {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  };
+  // 由种子字符串生成可复现的伪随机函数（mulberry32）
+  u.seedRand = function (seedStr) {
+    let a = 1779033703;
+    const s = String(seedStr || '');
+    for (let i = 0; i < s.length; i++) a = Math.imul(a ^ s.charCodeAt(i), 3432918353) >>> 0;
+    a = Math.imul(a ^ (a >>> 13), 2246822507) >>> 0;
+    return function () {
+      a = Math.imul(a ^ (a >>> 15), 4022730753) >>> 0;
+      a = (a ^ (a >>> 14)) >>> 0;
+      return a / 4294967296;
+    };
+  };
   window.$$ = u;
 })();

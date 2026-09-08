@@ -60,12 +60,27 @@
     computed: {
       list() {
         let list;
-        if (this.module.type === 'featured') list = DB.resources.filter((r) => r.featured);
-        else if (this.module.type === 'latest') list = DB.resources.slice();
+        const type = this.module.type;
+        if (type === 'featured') list = DB.resources.filter((r) => r.featured);
+        else if (type === 'random') list = this.randomPool();
+        else if (type === 'latest') list = DB.resources.slice();
         else if (this.module.tagId) list = DB.resourcesOfTag(this.module.tagId, true);
         else list = DB.resources.slice();
-        if (this.module.type !== 'featured') list = list.slice().sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+        if (type !== 'featured' && type !== 'random') list = list.slice().sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
         return list.slice(0, this.module.limit || 12);
+      },
+      // 随机推荐：以「日期 + 模块 id」为种子做可复现洗牌，当天内容不变、次日更换
+      randomPool() {
+        const arr = DB.resources.slice();
+        if (!arr.length) return arr;
+        const rand = $$.seedRand('home-random|' + (this.module.id || 'random') + '|' + $$.dayKey());
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(rand() * (i + 1));
+          const t = arr[i];
+          arr[i] = arr[j];
+          arr[j] = t;
+        }
+        return arr;
       },
       showMore() {
         return this.module.tagId || this.module.type === 'latest';
@@ -81,6 +96,7 @@
   <div class="home-mod-head">
     <h2>{{ module.title }}</h2>
     <div class="sub" v-if="module.type==='featured'">被标记为「推荐」的资源</div>
+    <div class="sub" v-else-if="module.type==='random'">每天自动更换一批随机资源</div>
     <div class="sub" v-else-if="module.type==='latest'">最近收录的{{ total }}个资源</div>
     <span class="more"><el-link v-if="module.tagId" type="primary" @click="DB.navigate('/library?tag='+module.tagId)">查看全部 →</el-link></span>
   </div>
@@ -95,7 +111,7 @@
     props: { module: Object },
     components: { ModuleCarousel, ModuleMarkdown, ModuleResourceGrid },
     computed: {
-      isGrid() { return ['featured', 'latest', 'tagGrid'].includes(this.module.type); },
+      isGrid() { return ['featured', 'latest', 'tagGrid', 'random'].includes(this.module.type); },
       isCarousel() { return this.module.type === 'tagCarousel'; },
     },
     template: `
@@ -131,7 +147,7 @@
       autoModuleTitle(m) {
         const t = this.moduleTypes().find((x) => x.value === m.type);
         if (!t) return;
-        const defaults = { featured: '精选推荐', latest: '最新内容', tagGrid: '标签资源', tagCarousel: '标签轮播', markdown: '文本卡片' };
+        const defaults = { featured: '精选推荐', random: '随机推荐', latest: '最新内容', tagGrid: '标签资源', tagCarousel: '标签轮播', markdown: '文本卡片' };
         m.title = defaults[m.type] || m.title;
       },
       removeMenu(i) { this.menu.splice(i, 1); },
@@ -152,6 +168,7 @@
       moduleTypes() {
         return [
           { value: 'featured', label: '精选推荐（推荐内容）' },
+          { value: 'random', label: '随机推荐（每日更换）' },
           { value: 'latest', label: '最新内容' },
           { value: 'tagGrid', label: '标签资源墙（网格）' },
           { value: 'tagCarousel', label: '标签媒体轮播（图片/视频）' },
@@ -217,15 +234,15 @@
               <el-option v-for="t in DB.tagOptions" :key="t.id" :value="t.id" :label="t.path"></el-option>
             </el-select>
           </div>
-          <div v-if="m.type==='latest'" style="margin:6px 0">
+          <div v-if="m.type==='latest' || m.type==='random'" style="margin:6px 0">
             <span class="text-muted" style="font-size:12px">显示数量：</span>
             <el-input-number v-model="m.limit" :min="1" :max="60" size="small"></el-input-number>
           </div>
           <div v-if="m.type==='markdown'" style="margin:6px 0">
             <MdEditor v-model="m.content" min-height="120px" placeholder="模块内容（Markdown），可写站点介绍、导航说明等" />
           </div>
-          <div v-if="m.type==='featured' || m.type==='tagGrid' || m.type==='tagCarousel'" class="text-muted" style="font-size:12px">
-            {{ m.type==='featured' ? '自动展示标记为推荐的最新资源' : '' }}{{ m.type==='tagGrid' ? '展示该标签（含子标签）资源网格' : '' }}{{ m.type==='tagCarousel' ? '图片与视频自动轮播' : '' }}
+          <div v-if="m.type==='featured' || m.type==='random' || m.type==='tagGrid' || m.type==='tagCarousel'" class="text-muted" style="font-size:12px">
+            {{ m.type==='featured' ? '自动展示标记为推荐的最新资源' : '' }}{{ m.type==='random' ? '每天自动随机挑选一批资源（当天固定、次日更换）' : '' }}{{ m.type==='tagGrid' ? '展示该标签（含子标签）资源网格' : '' }}{{ m.type==='tagCarousel' ? '图片与视频自动轮播' : '' }}
           </div>
         </div>
       </div>
