@@ -1,7 +1,7 @@
 'use strict';
 const path = require('path');
 const fs = require('fs');
-const { db, DATA_DIR, APP_ROOT, classifyName } = require('./db');
+const { db, DATA_DIR, APP_ROOT, DB_FILE, classifyName } = require('./db');
 
 // ---------- file helpers ----------
 function safeName(name) {
@@ -425,6 +425,7 @@ module.exports = {
   setPrimaryEdge,
   listEdges,
   DATA_DIR,
+  DB_FILE,
   APP_ROOT,
   db,
 };

@@ -2,6 +2,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { execFile } = require('child_process');
 const express = require('express');
 const multer = require('multer');
 const st = require('./store');
@@ -473,22 +474,41 @@ app.post('/api/config/move', wrap(async (req, res) => {
     media: st.normalizeFolder(req.body.media, oldCfg.folders.media),
     markdown: st.normalizeFolder(req.body.markdown, oldCfg.folders.markdown),
   };
+  // 递归搬移：同设备用 rename；跨设备（EXDEV，如系统盘 → 外接硬盘）降级为「复制 + 删除」
   const moveDir = (from, to, label) => {
     if (path.resolve(from) === path.resolve(to)) return;
     if (!fs.existsSync(from)) return;
+    if (fs.existsSync(to) && !fs.lstatSync(to).isDirectory()) return; // 目标被同名文件占用
     fs.mkdirSync(to, { recursive: true });
+    const moveOne = (src, dst, isDir) => {
+      if (fs.existsSync(dst)) {
+        // 同名：目录则递归合并（保留目标中已有内容），文件保留目标中已有版本
+        if (isDir && fs.lstatSync(dst).isDirectory()) moveDir(src, dst, label);
+        return;
+      }
+      try {
+        fs.renameSync(src, dst);
+      } catch (e) {
+        if (e.code === 'EXDEV') {
+          if (isDir) {
+            fs.mkdirSync(dst, { recursive: true });
+            for (const sub of fs.readdirSync(src, { withFileTypes: true })) {
+              if (sub.name === '.DS_Store') continue;
+              moveOne(path.join(src, sub.name), path.join(dst, sub.name), sub.isDirectory());
+            }
+            fs.rmSync(src, { recursive: true, force: true }); // 源目录内容已全部搬走
+          } else {
+            fs.copyFileSync(src, dst);
+            fs.unlinkSync(src);
+          }
+        } else {
+          throw e;
+        }
+      }
+    };
     for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
       if (entry.name === '.DS_Store') continue;
-      const src = path.join(from, entry.name);
-      const dst = path.join(to, entry.name);
-      if (fs.existsSync(dst)) {
-        if (fs.lstatSync(dst).isDirectory() && fs.lstatSync(src).isDirectory()) {
-          moveDir(src, dst, label);
-          continue;
-        }
-        continue; // keep existing target file
-      }
-      fs.renameSync(src, dst);
+      moveOne(path.join(from, entry.name), path.join(to, entry.name), entry.isDirectory());
     }
   };
   moveDir(oldCfg.folders.media, target.media, '媒体');
@@ -544,6 +564,112 @@ app.post('/api/fs/mkdir', wrap(async (req, res) => {
   if (!path.isAbsolute(dir)) return fail(res, '请输入绝对路径');
   fs.mkdirSync(dir, { recursive: true });
   ok(res, { dir });
+}));
+
+// ================= native folder picker (OS dialog) =================
+// 由后端调用系统原生「选择文件夹」对话框（浏览器自身无法弹系统级目录框）。
+//   macOS   : /usr/bin/osascript  choose folder（NSOpenPanel，经系统授权 Powerbox 授权所选目录）
+//   Windows : powershell -STA  FolderBrowserDialog
+//   Linux   : zenity / kdialog
+// 选中后服务端做真实读写探测，以校验「授权」是否覆盖本进程（macOS TCC 等）。
+const FOLDER_PICKER_TITLES = { media: '选择媒体目录', markdown: '选择 Markdown 目录' };
+
+function execFileP(cmd, args) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: 180000 }, (err, stdout, stderr) =>
+      resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') }));
+  });
+}
+function appleString(s) {
+  return '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ') + '"';
+}
+function psString(s) {
+  return '"' + String(s).replace(/(["\\$`])/g, '\\$1').replace(/[\r\n]+/g, ' ') + '"';
+}
+
+async function nativeFolderPick(title, start) {
+  let stat;
+  try { stat = fs.statSync(start); } catch (e) { stat = null; }
+  const usable = stat && stat.isDirectory() ? start : os.homedir();
+  if (process.platform === 'darwin') {
+    const script = 'POSIX path of (choose folder with prompt ' + appleString(title) +
+      ' default location (POSIX file ' + appleString(usable) + ' as alias))';
+    const { err, stdout, stderr } = await execFileP('/usr/bin/osascript', ['-e', script]);
+    if (!err) {
+      const p = stdout.trim();
+      return p ? { dir: p } : { canceled: true };
+    }
+    return /cancel|user canceled|-128/i.test(stderr)
+      ? { canceled: true }
+      : { error: '无法打开系统文件夹选择器：' + (stderr.trim() || err.message) };
+  }
+  if (process.platform === 'win32') {
+    const psCode =
+      'Add-Type -AssemblyName System.Windows.Forms; ' +
+      '$d = New-Object System.Windows.Forms.FolderBrowserDialog; ' +
+      '$d.Description = ' + psString(title) + '; ' +
+      'try { $d.SelectedPath = ' + psString(usable) + ' } catch {}; ' +
+      'if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }';
+    const { err, stdout } = await execFileP('powershell.exe', ['-NoProfile', '-STA', '-Command', psCode]);
+    if (!err) {
+      const p = stdout.trim();
+      return p ? { dir: p } : { canceled: true };
+    }
+    if (err.code === 'ENOENT') return { unsupported: true };
+    return { error: '无法打开系统文件夹选择器：' + err.message };
+  }
+  if (process.platform === 'linux') {
+    const tries = [
+      ['zenity', ['--file-selection', '--directory', '--title=' + title, usable]],
+      ['kdialog', ['--title', title, '--getexistingdirectory', usable]],
+    ];
+    for (const [cmd, args] of tries) {
+      const { err, stdout } = await execFileP(cmd, args);
+      if (!err) {
+        const p = stdout.trim();
+        return p ? { dir: p } : { canceled: true };
+      }
+      if (err.code !== 'ENOENT') return { error: '无法打开系统文件夹选择器：' + err.message };
+    }
+    return { unsupported: true };
+  }
+  return { unsupported: true };
+}
+
+// 校验目录可读可写：数据目录后续需要持续写入，权限不足提前告知（macOS TCC 等）。
+async function verifyFolderUsable(dir) {
+  let stat;
+  try { stat = await fs.promises.stat(dir); } catch (e) {
+    return { error: '目录不存在或无法访问：' + dir };
+  }
+  if (!stat.isDirectory()) return { error: '所选路径不是文件夹：' + dir };
+  const probe = path.join(dir, '.wzscms-wtest-' + Date.now() + '-' + Math.floor(Math.random() * 1e6));
+  try {
+    await fs.promises.writeFile(probe, 'probe');
+    await fs.promises.unlink(probe);
+  } catch (e) {
+    if (process.platform === 'darwin') {
+      return {
+        code: e.code || 'EACCES',
+        error: '「' + dir + '」当前无法写入。macOS 尚未授权本程序访问该位置：请在「系统设置 → 隐私与安全性 → 文件与文件夹（或 完全磁盘访问）」中，为承载 WszCMS 的程序（如 CodeBuddy、终端等）开启访问权限后重试。',
+      };
+    }
+    return { code: e.code || 'EACCES', error: '无法向该目录写入文件（' + (e.code || e.message) + '），请选择可写目录后重试。' };
+  }
+  return {};
+}
+
+// GET /api/fs/pick?target=media|markdown —— 打开系统原生「选择文件夹」对话框
+app.get('/api/fs/pick', wrap(async (req, res) => {
+  const target = req.query.target === 'markdown' ? 'markdown' : 'media';
+  const cfg = st.loadConfig();
+  const start = (cfg.folders && cfg.folders[target]) || os.homedir();
+  const picked = await nativeFolderPick(FOLDER_PICKER_TITLES[target] || '选择文件夹', start);
+  if (picked.unsupported) return ok(res, { unsupported: true });
+  if (picked.canceled) return ok(res, { canceled: true });
+  if (picked.error) return ok(res, { error: picked.error });
+  const check = await verifyFolderUsable(picked.dir);
+  return ok(res, { dir: picked.dir, ...check });
 }));
 
 // ================= fallback =================

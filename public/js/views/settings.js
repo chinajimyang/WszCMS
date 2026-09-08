@@ -75,7 +75,29 @@
           this.busy = false;
         }
       },
-      // ---- local folder browser ----
+      // ---- system-native folder picker ----
+      // 点击「浏览…」调用服务端的 /api/fs/pick，弹出操作系统原生「选择文件夹」对话框；
+      // 平台不支持或异常时自动回退到下方内置的本地目录浏览对话框。
+      async nativeBrowse(target) {
+        try {
+          const j = await API.get('/api/fs/pick?target=' + encodeURIComponent(target));
+          if (j.unsupported) {
+            this.openFs(target); // 无可用的系统选择器 → 内置目录浏览
+            return;
+          }
+          if (j.canceled) return; // 用户在系统对话框里点了取消，静默返回
+          if (j.error) {
+            ElementPlus.ElMessage.error(j.error);
+            return;
+          }
+          const key = target === 'media' ? 'mediaDir' : 'mdDir';
+          this[key] = j.dir;
+          ElementPlus.ElMessage.success('已选择目录，点击下方「保存目录指向」生效');
+        } catch (e) {
+          this.openFs(target); // 请求异常时回退内置目录浏览
+        }
+      },
+      // ---- local folder browser (fallback) ----
       openFs(target) {
         this.fsTarget = target;
         this.fsDlg = true;
@@ -234,14 +256,14 @@
           <el-form-item label="媒体目录">
             <div style="display:flex;gap:8px;width:100%">
               <el-input v-model="mediaDir" placeholder="/绝对/路径/媒体库" />
-              <el-button @click="openFs('media')">浏览…</el-button>
+              <el-button @click="nativeBrowse('media')">浏览…</el-button>
               <el-button @click="mediaDir=DB.config.folders.media">还原</el-button>
             </div>
           </el-form-item>
           <el-form-item label="Markdown目录">
             <div style="display:flex;gap:8px;width:100%">
               <el-input v-model="mdDir" placeholder="/绝对/路径/知识库md" />
-              <el-button @click="openFs('markdown')">浏览…</el-button>
+              <el-button @click="nativeBrowse('markdown')">浏览…</el-button>
               <el-button @click="mdDir=DB.config.folders.markdown">还原</el-button>
             </div>
           </el-form-item>
